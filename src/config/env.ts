@@ -18,7 +18,7 @@ const envSchema = z.object({
     /^[a-z0-9-]+\.myshopify\.com$/,
     'must be the *.myshopify.com admin domain, not the storefront domain',
   ),
-  SHOPIFY_ADMIN_ACCESS_TOKEN: z.string().startsWith('shpat_'),
+  SHOPIFY_ADMIN_ACCESS_TOKEN: z.string().min(1),
   SHOPIFY_WEBHOOK_SECRET: z.string().min(8),
   SHOPIFY_API_VERSION: z.string().default('2024-10'),
   SHOPIFY_STOREFRONT_URL: z.string().url(),
