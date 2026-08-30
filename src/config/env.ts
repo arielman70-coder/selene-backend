@@ -18,7 +18,12 @@ const envSchema = z.object({
     /^[a-z0-9-]+\.myshopify\.com$/,
     'must be the *.myshopify.com admin domain, not the storefront domain',
   ),
-  SHOPIFY_ADMIN_ACCESS_TOKEN: z.string().min(1),
+  // Either paste a long-lived admin token, or supply client credentials and
+  // let the backend exchange them at runtime. The refine below enforces that
+  // at least one path is fully configured.
+  SHOPIFY_ADMIN_ACCESS_TOKEN: z.string().min(1).optional(),
+  SHOPIFY_CLIENT_ID: z.string().min(1).optional(),
+  SHOPIFY_CLIENT_SECRET: z.string().min(1).optional(),
   SHOPIFY_WEBHOOK_SECRET: z.string().min(8),
   SHOPIFY_API_VERSION: z.string().default('2024-10'),
   SHOPIFY_STOREFRONT_URL: z.string().url(),
@@ -66,6 +71,28 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   CRON_SECRET: z.string().min(16, 'use at least 16 chars — this guards every job endpoint'),
   CORS_ORIGINS: z.string().default(''),
+}).superRefine((v, ctx) => {
+  const hasStatic = Boolean(v.SHOPIFY_ADMIN_ACCESS_TOKEN);
+  const hasClient = Boolean(v.SHOPIFY_CLIENT_ID && v.SHOPIFY_CLIENT_SECRET);
+
+  if (!hasStatic && !hasClient) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['SHOPIFY_ADMIN_ACCESS_TOKEN'],
+      message:
+        'set SHOPIFY_ADMIN_ACCESS_TOKEN, or both SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET',
+    });
+  }
+
+  // Half-configured client credentials are almost always a typo'd var name,
+  // and silently falling back to the static token would hide it.
+  if (!hasClient && (v.SHOPIFY_CLIENT_ID || v.SHOPIFY_CLIENT_SECRET)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['SHOPIFY_CLIENT_SECRET'],
+      message: 'SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET must be set together',
+    });
+  }
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -86,6 +113,11 @@ export const isProduction = env.NODE_ENV === 'production';
 export const corsOrigins = env.CORS_ORIGINS.split(',')
   .map((o) => o.trim())
   .filter(Boolean);
+
+/** When set, shopify.ts exchanges these for an access token instead of using a static one. */
+export const shopifyClientCredentials = env.SHOPIFY_CLIENT_ID && env.SHOPIFY_CLIENT_SECRET
+  ? { clientId: env.SHOPIFY_CLIENT_ID, clientSecret: env.SHOPIFY_CLIENT_SECRET }
+  : null;
 
 /** Twilio is optional; whatsapp.ts only reaches for it when fully configured. */
 export const twilioConfigured = Boolean(

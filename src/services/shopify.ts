@@ -1,13 +1,101 @@
-import { env } from '../config/env';
+import { env, shopifyClientCredentials } from '../config/env';
 import { logger } from '../utils/logger';
 
 const BASE = `https://${env.SHOPIFY_STORE_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}`;
+const TOKEN_URL = `https://${env.SHOPIFY_STORE_DOMAIN}/admin/oauth/access_token`;
 
-const HEADERS: Record<string, string> = {
-  'X-Shopify-Access-Token': env.SHOPIFY_ADMIN_ACCESS_TOKEN,
-  'Content-Type': 'application/json',
-  Accept: 'application/json',
-};
+/**
+ * Access token, obtained one of two ways:
+ *
+ *   - SHOPIFY_ADMIN_ACCESS_TOKEN, used as-is
+ *   - SHOPIFY_CLIENT_ID/SECRET, exchanged via the client_credentials grant
+ *
+ * The exchanged token is cached in memory. Shopify returns `expires_in` for
+ * tokens that expire; when it does, we refresh a minute early rather than
+ * waiting to be surprised mid-request. When it doesn't, the token is treated
+ * as long-lived and only refreshed if a call comes back 401.
+ *
+ * Cached per process, so a restart just re-fetches. There is no persistence
+ * here on purpose — a token in the database is one more secret to protect.
+ */
+let cachedToken: string | null = null;
+let tokenExpiresAt = 0;
+let inFlight: Promise<string> | null = null;
+
+async function exchangeClientCredentials(): Promise<string> {
+  const creds = shopifyClientCredentials!;
+
+  const res = await fetch(TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({
+      grant_type: 'client_credentials',
+      client_id: creds.clientId,
+      client_secret: creds.clientSecret,
+    }),
+  });
+
+  const text = await res.text();
+  if (!res.ok) {
+    throw new ShopifyError(
+      `Shopify token exchange failed (${res.status})`,
+      res.status,
+      text.slice(0, 300),
+    );
+  }
+
+  let parsed: { access_token?: string; expires_in?: number };
+  try {
+    parsed = JSON.parse(text) as typeof parsed;
+  } catch {
+    throw new ShopifyError('Shopify token exchange returned non-JSON', res.status, text.slice(0, 300));
+  }
+
+  if (!parsed.access_token) {
+    throw new ShopifyError('Shopify token exchange returned no access_token', res.status, text.slice(0, 300));
+  }
+
+  // 60s of slack so a token can't expire between the check and the request.
+  tokenExpiresAt = parsed.expires_in
+    ? Date.now() + Math.max(0, parsed.expires_in - 60) * 1000
+    : Number.POSITIVE_INFINITY;
+
+  cachedToken = parsed.access_token;
+
+  logger.info('Shopify access token obtained', {
+    expiresIn: parsed.expires_in ?? 'not specified',
+  });
+
+  return cachedToken;
+}
+
+async function getAccessToken(): Promise<string> {
+  if (env.SHOPIFY_ADMIN_ACCESS_TOKEN) return env.SHOPIFY_ADMIN_ACCESS_TOKEN;
+  if (cachedToken && Date.now() < tokenExpiresAt) return cachedToken;
+
+  // Single-flight: the abandoned-cart job fires many calls at once, and
+  // without this a cold cache would trigger one exchange per call.
+  if (!inFlight) {
+    inFlight = exchangeClientCredentials().finally(() => {
+      inFlight = null;
+    });
+  }
+  return inFlight;
+}
+
+/** Drops the cached token so the next call re-exchanges. */
+function invalidateToken(): void {
+  cachedToken = null;
+  tokenExpiresAt = 0;
+}
+
+async function buildHeaders(): Promise<Record<string, string>> {
+  return {
+    'X-Shopify-Access-Token': await getAccessToken(),
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  };
+}
 
 export class ShopifyError extends Error {
   constructor(
@@ -32,12 +120,21 @@ async function shopifyFetch<T>(
   path: string,
   init: RequestInit = {},
   attempt = 1,
+  didRefresh = false,
 ): Promise<T> {
   const maxAttempts = 4;
   const res = await fetch(`${BASE}${path}`, {
     ...init,
-    headers: { ...HEADERS, ...(init.headers as Record<string, string> | undefined) },
+    headers: { ...(await buildHeaders()), ...(init.headers as Record<string, string> | undefined) },
   });
+
+  // An exchanged token can be revoked or expire without an expires_in hint.
+  // Refresh once and retry before treating it as a real failure.
+  if (res.status === 401 && shopifyClientCredentials && !env.SHOPIFY_ADMIN_ACCESS_TOKEN && !didRefresh) {
+    logger.warn('Shopify returned 401; refreshing access token', { path });
+    invalidateToken();
+    return shopifyFetch<T>(path, init, attempt, true);
+  }
 
   if (res.status === 429 || res.status >= 500) {
     if (attempt >= maxAttempts) {
@@ -51,7 +148,7 @@ async function shopifyFetch<T>(
 
     logger.warn('Shopify throttled, backing off', { path, status: res.status, backoff, attempt });
     await sleep(backoff);
-    return shopifyFetch<T>(path, init, attempt + 1);
+    return shopifyFetch<T>(path, init, attempt + 1, didRefresh);
   }
 
   if (!res.ok) {

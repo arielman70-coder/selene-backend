@@ -122,6 +122,12 @@ Things that are deliberate, so they don't get "simplified" back later:
   by hand leaves the parser with nothing and `req.body` permanently empty.
 - **HMAC compares length before `timingSafeEqual`**, which throws on mismatched
   buffers — a one-character header would otherwise 500 instead of 401.
+- **The Shopify token can be static or exchanged.** Set
+  `SHOPIFY_ADMIN_ACCESS_TOKEN`, or set `SHOPIFY_CLIENT_ID`/`SHOPIFY_CLIENT_SECRET`
+  and the backend exchanges them via `POST /admin/oauth/access_token`
+  (`grant_type=client_credentials`). The exchanged token is cached in memory,
+  refreshed a minute before any `expires_in`, fetched single-flight so a batch
+  of concurrent calls triggers one exchange, and re-fetched once on a 401.
 - **Coupon codes use `crypto.randomInt`.** These are bearer instruments;
   `Math.random()` is predictable enough to guess forward from a known code.
 - **Webhooks ack before working.** Shopify times out at 5s and retries.
@@ -148,7 +154,11 @@ Things that are deliberate, so they don't get "simplified" back later:
   → 401; valid session passes into the handler
 - Job auth: missing and wrong `CRON_SECRET` → 401
 - Env validation rejects missing vars, a storefront domain in
-  `SHOPIFY_STORE_DOMAIN`, and a short `CRON_SECRET`
+  `SHOPIFY_STORE_DOMAIN`, a short `CRON_SECRET`, no Shopify credential of
+  either kind, and a half-set client id/secret pair
+- Shopify token exchange (against a stubbed fetch): 6 concurrent cold-cache
+  calls trigger exactly 1 exchange, the cached token is reused, and a 401
+  triggers exactly one refresh plus a retry with the new token
 - Phone normalization: 13 cases (local, dashed, spaced, `00`, `+972`,
   redundant trunk zero, landline, junk)
 
