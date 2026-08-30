@@ -12,8 +12,8 @@
     "resolveJsonModule": true,
     "sourceMap": true,
     "outDir": "./dist",
-    "rootDir": "."
+    "rootDir": "./src"
   },
-  "include": ["src/**/*.ts", "scripts/**/*.ts"],
+  "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }
