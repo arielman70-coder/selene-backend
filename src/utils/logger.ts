@@ -41,11 +41,47 @@ function emit(level: Level, message: string, context?: Record<string, unknown>) 
   (level === 'error' || level === 'warn' ? console.error : console.log)(line);
 }
 
-/** Errors don't survive JSON.stringify — pull the useful parts out by hand. */
+/**
+ * Errors don't survive JSON.stringify — pull the useful parts out by hand.
+ *
+ * Handles plain objects explicitly, because supabase-js rejects with a
+ * PostgrestError, which is NOT an Error instance. Falling through to
+ * String(err) turned every database failure in the logs into the literal
+ * text "[object Object]", throwing away the message, code and hint that say
+ * what actually went wrong.
+ */
 export function serializeError(err: unknown): Record<string, unknown> {
   if (err instanceof Error) {
-    return { name: err.name, message: err.message, stack: err.stack };
+    const out: Record<string, unknown> = {
+      name: err.name,
+      message: err.message,
+      stack: err.stack,
+    };
+    // Error.cause and custom fields (e.g. ShopifyError.status/body).
+    for (const key of ['cause', 'code', 'status', 'body']) {
+      const value = (err as unknown as Record<string, unknown>)[key];
+      if (value !== undefined) out[key] = value instanceof Error ? serializeError(value) : value;
+    }
+    return out;
   }
+
+  if (err !== null && typeof err === 'object') {
+    const o = err as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const key of ['message', 'code', 'details', 'hint', 'status', 'statusText', 'name']) {
+      if (o[key] !== undefined && o[key] !== null) out[key] = o[key];
+    }
+    // Nothing recognisable — dump it rather than lose it.
+    if (Object.keys(out).length === 0) {
+      try {
+        return { message: JSON.stringify(o).slice(0, 2000) };
+      } catch {
+        return { message: Object.prototype.toString.call(o) };
+      }
+    }
+    return out;
+  }
+
   return { message: String(err) };
 }
 

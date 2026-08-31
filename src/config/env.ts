@@ -95,7 +95,20 @@ const envSchema = z.object({
   }
 });
 
-const parsed = envSchema.safeParse(process.env);
+/**
+ * An empty value means "not set".
+ *
+ * Both .env files and the Railway dashboard produce `KEY=` for a variable
+ * someone left blank. Without this, an optional var written that way fails
+ * `.min(1)` — reported as "must contain at least 1 character(s)", which reads
+ * like a value problem rather than a missing one — and a required var reports
+ * the same instead of the clearer "Required".
+ */
+const rawEnv = Object.fromEntries(
+  Object.entries(process.env).filter(([, v]) => v !== undefined && v.trim() !== ''),
+);
+
+const parsed = envSchema.safeParse(rawEnv);
 
 if (!parsed.success) {
   const issues = parsed.error.issues
