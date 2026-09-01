@@ -156,7 +156,14 @@ async function shopifyFetch<T>(
     throw new ShopifyError(`Shopify ${res.status} on ${path}`, res.status, body.slice(0, 500));
   }
 
-  return (await res.json()) as T;
+  // DELETE returns 200 with an empty body, and res.json() throws on that
+  // ("Unexpected end of JSON input"). deletePriceRule is the rollback path
+  // for a half-created coupon, so this made every successful cleanup look
+  // like a failure in the logs — and would have masked a genuine one.
+  const text = await res.text();
+  if (!text.trim()) return undefined as T;
+
+  return JSON.parse(text) as T;
 }
 
 // ---------------------------------------------------------------------------
