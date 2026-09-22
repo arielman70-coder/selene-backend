@@ -10,10 +10,11 @@ export type Tier = 'bronze' | 'silver' | 'gold' | 'platinum';
 
 export interface TierConfig {
   tier: Tier;
-  display_name: string;
   min_spent: number;
   cashback_pct: number;
-  sort_order: number;
+  label_he: string;
+  label_en: string;
+  color_hex: string;
 }
 
 export interface Customer {

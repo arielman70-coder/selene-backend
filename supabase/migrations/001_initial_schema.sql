@@ -14,20 +14,23 @@ create extension if not exists "citext";     -- case-insensitive email
 -- ---------------------------------------------------------------------
 -- tier_config: cashback tiers. Seeded below, editable at runtime.
 -- ---------------------------------------------------------------------
+-- min_spent IS the ladder — ordering by it is what ranks the tiers, so there
+-- is no separate rank column that can drift out of step with the thresholds.
 create table if not exists tier_config (
   tier          text primary key,
-  display_name  text not null,
   min_spent     numeric(12,2) not null default 0,
   cashback_pct  numeric(5,4)  not null default 0.02,  -- 0.02 = 2%
-  sort_order    int not null default 0,
+  label_he      text not null,
+  label_en      text not null,
+  color_hex     text not null default '#1a1a1a',
   created_at    timestamptz not null default now()
 );
 
-insert into tier_config (tier, display_name, min_spent, cashback_pct, sort_order) values
-  ('bronze',   'ברונזה', 0,     0.02, 1),
-  ('silver',   'כסף',    1000,  0.03, 2),
-  ('gold',     'זהב',    3000,  0.05, 3),
-  ('platinum', 'פלטינה', 7500,  0.07, 4)
+insert into tier_config (tier, min_spent, cashback_pct, label_he, label_en, color_hex) values
+  ('bronze',   0,     0.02, 'ברונזה', 'Bronze',   '#b08d57'),
+  ('silver',   1000,  0.03, 'כסף',    'Silver',   '#a8a9ad'),
+  ('gold',     3000,  0.05, 'זהב',    'Gold',     '#c9a961'),
+  ('platinum', 7500,  0.07, 'פלטינה', 'Platinum', '#5d6d7e')
 on conflict (tier) do nothing;
 
 -- ---------------------------------------------------------------------

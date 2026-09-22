@@ -14,10 +14,19 @@ export async function getCustomerProfile(req: Request, res: Response): Promise<v
   const customer = (req as ClubRequest).customer!;
 
   try {
-    const { data: tiers } = await db
-      .from('tier_config').select('*').order('sort_order', { ascending: true });
+    // Ordered by spend, which IS the ladder — there is no separate rank column
+    // to drift out of step with the thresholds.
+    const { data: tiers, error: tierError } = await db
+      .from('tier_config').select('*').order('min_spent', { ascending: true });
+
+    // Checked, not swallowed. Ignoring this error is what made a renamed
+    // column surface as `tier: null` instead of a failure anyone could see.
+    if (tierError) throw new Error(`tier_config unreadable: ${tierError.message}`);
 
     const ladder = (tiers ?? []) as TierConfig[];
+    if (ladder.length === 0) {
+      logger.warn('tier_config is empty — tier display and upgrades are inert');
+    }
     const current = ladder.find((t) => t.tier === customer.tier) ?? null;
     const next = ladder.find((t) => Number(t.min_spent) > Number(customer.total_spent)) ?? null;
 
@@ -25,12 +34,16 @@ export async function getCustomerProfile(req: Request, res: Response): Promise<v
       customer: clubProfile(customer),
       tier: current && {
         tier: current.tier,
-        display_name: current.display_name,
+        label_he: current.label_he,
+        label_en: current.label_en,
+        color_hex: current.color_hex,
         cashback_pct: Number(current.cashback_pct),
       },
       next_tier: next && {
         tier: next.tier,
-        display_name: next.display_name,
+        label_he: next.label_he,
+        label_en: next.label_en,
+        color_hex: next.color_hex,
         cashback_pct: Number(next.cashback_pct),
         min_spent: Number(next.min_spent),
         remaining: Math.max(0, Number(next.min_spent) - Number(customer.total_spent)),

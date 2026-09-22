@@ -241,16 +241,28 @@ export async function recalculateTier(customerId: string): Promise<Tier | null> 
     .from('customers').select('total_spent, tier').eq('id', customerId).maybeSingle();
   if (!customer) return null;
 
-  const { data: tiers } = await db
+  const { data: tiers, error } = await db
     .from('tier_config')
-    .select('tier, min_spent, sort_order')
+    .select('tier, min_spent')
     .order('min_spent', { ascending: false });
 
-  const current = (tiers ?? []).find((t) => t.tier === customer.tier);
-  const earned = (tiers ?? []).find((t) => Number(customer.total_spent) >= Number(t.min_spent));
+  // Loud on failure. This query silently referenced a column that did not
+  // exist, so it errored on every call and nobody was ever upgraded.
+  if (error) {
+    logger.error('tier_config unreadable; skipping tier recalculation', error, { customerId });
+    return customer.tier as Tier;
+  }
+  if (!tiers?.length) {
+    logger.warn('tier_config is empty; no tier to award', { customerId });
+    return customer.tier as Tier;
+  }
+
+  const current = tiers.find((t) => t.tier === customer.tier);
+  const earned = tiers.find((t) => Number(customer.total_spent) >= Number(t.min_spent));
 
   if (!earned || earned.tier === customer.tier) return customer.tier as Tier;
-  if (current && Number(earned.sort_order) < Number(current.sort_order)) {
+  // Rank by threshold, so a refund can never demote someone.
+  if (current && Number(earned.min_spent) < Number(current.min_spent)) {
     return customer.tier as Tier;
   }
 

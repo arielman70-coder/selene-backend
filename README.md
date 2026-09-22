@@ -120,6 +120,12 @@ Things that are deliberate, so they don't get "simplified" back later:
 - **Redemption debits before minting.** A failed mint is refunded immediately.
   Minting first would leave live, unpaid-for discount codes in Shopify when the
   debit fails.
+- **`tier_config` has no rank column.** `min_spent` is the ladder, so ordering
+  by it is the ranking — nothing can drift out of step with the thresholds the
+  way a separate `sort_order` can.
+- **Reads of `tier_config` check their error.** Swallowing it let a renamed
+  column surface as `tier: null` in the API and as tier upgrades that silently
+  never happened, rather than as a failure anyone could see.
 - **One `earn` ledger row per order**, enforced by a partial unique index. It is
   the last line of defence against a replayed webhook double-crediting.
 - **Jobs claim rows with `FOR UPDATE SKIP LOCKED`.** A run that overruns its
