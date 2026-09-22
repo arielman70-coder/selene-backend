@@ -96,12 +96,20 @@ export function rateLimit(opts: {
   limit: number;
   windowSeconds: number;
   byIp?: boolean;
+  /**
+   * Derive the bucket from the request instead of the caller — used to limit
+   * OTP sends per email address, so one attacker can't mail-bomb a victim by
+   * rotating their own IP.
+   */
+  keyFrom?: (req: Request) => string | null;
 }) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const club = req as ClubRequest;
-    const subject = opts.byIp
-      ? (req.ip ?? 'unknown')
-      : (club.customer?.id ?? club.customerId ?? req.ip ?? 'unknown');
+    const derived = opts.keyFrom?.(req);
+    const subject = derived
+      ?? (opts.byIp
+        ? (req.ip ?? 'unknown')
+        : (club.customer?.id ?? club.customerId ?? req.ip ?? 'unknown'));
 
     const { data, error } = await db.rpc('check_rate_limit', {
       p_key: `${opts.name}:${subject}`,

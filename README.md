@@ -58,7 +58,8 @@ npm run build && npm start
 | POST   | `/webhooks/order-create`         | Shopify HMAC  |
 | POST   | `/webhooks/order-paid`           | Shopify HMAC  |
 | POST   | `/webhooks/order-refund`         | Shopify HMAC  |
-| POST   | `/api/identify`                  | none, IP rate-limited |
+| POST   | `/api/auth/request-code`         | none, rate-limited |
+| POST   | `/api/auth/verify-code`          | none, rate-limited |
 | GET    | `/api/customer/profile`          | club session  |
 | PATCH  | `/api/customer/preferences`      | club session  |
 | GET    | `/api/customer/cashback-history` | club session  |
@@ -68,12 +69,17 @@ npm run build && npm start
 | POST   | `/jobs/upsell-queue`             | `CRON_SECRET` |
 | POST   | `/jobs/expire-coupons`           | `CRON_SECRET` |
 
-**Club page flow.** `POST /api/identify {email}` looks up the customer row the
-webhooks created and returns their balance plus a `session_token`, valid for
-`CLUB_SESSION_MINUTES` (default 30). The frontend sends that token as
-`Authorization: Bearer <token>` on the other routes, so an email never has to
-be re-posted. Unknown address → `404 {code: "NOT_FOUND"}`; expired token →
-`401 {code: "SESSION_EXPIRED"}`, and the page just asks for the email again.
+**Club login (email OTP).** `POST /api/auth/request-code {email}` mails a
+six-digit code; `POST /api/auth/verify-code {email, code}` returns the
+customer's balance plus a `session_token` valid for `CLUB_SESSION_MINUTES`
+(default 30). The frontend sends that token as `Authorization: Bearer <token>`
+on every other route. Expired token → `401 {code: "SESSION_EXPIRED"}`, and the
+page asks for the email again.
+
+`request-code` answers 200 with the same body whether or not the address is a
+customer — anything else makes it an oracle for who shops here. Codes are
+single-use, expire in `OTP_TTL_MINUTES`, survive `OTP_MAX_ATTEMPTS` wrong
+guesses, and issuing a new one voids the old.
 
 ## How the flows work
 
@@ -137,6 +143,12 @@ Things that are deliberate, so they don't get "simplified" back later:
 - **Webhooks ack before working.** Shopify times out at 5s and retries.
 - **The session token carries the customer id**, so no endpoint reads one from
   a request body.
+- **Login codes are stored as SHA-256 with `API_TOKEN_SECRET` as pepper.** Six
+  digits is a 1,000,000-wide space, so a plain hash is a rainbow table away
+  from useless; the pepper lives only in the environment, which keeps a leaked
+  database dump from yielding working codes. Verification and the attempt
+  counter run inside one Postgres function, so parallel requests can't both
+  spend the same code.
 - **Redemption codes are sent to the email/WhatsApp on file, never returned in
   the HTTP response.** Typing an email is not proof of owning it, so echoing
   the code back would let a stranger convert someone else's balance into a
@@ -152,8 +164,13 @@ Things that are deliberate, so they don't get "simplified" back later:
 - Boots; `/health` 200
 - Webhook auth: missing / short / wrong HMAC → 401; valid → 200; valid
   signature from an unexpected shop domain → 401
-- Club lookup: missing email → 400, malformed email → 400, well-formed email
-  reaches the DB lookup
+- Email OTP, against the real app with a stubbed database and mail provider:
+  known and unknown addresses return byte-identical responses; no code is
+  issued for an unknown address; correct code returns a working session;
+  replaying a code fails; requesting a new code voids the previous one; five
+  wrong guesses void the code; no code ever reaches the logs
+- Code generation over 20,000 samples: always six digits, leading zeros kept,
+  full range used, >90% unique; the pepper demonstrably changes the hash
 - Session auth: no token, garbage, expired, wrong issuer, and wrong signature
   → 401; valid session passes into the handler
 - Job auth: missing and wrong `CRON_SECRET` → 401

@@ -61,6 +61,13 @@ const envSchema = z.object({
   LOOKUP_RATE_LIMIT_PER_HOUR: z.coerce.number().int().positive().default(20),
   CLUB_SESSION_MINUTES: z.coerce.number().int().positive().default(30),
 
+  // Email OTP. Short TTL and few attempts are what keep a 6-digit code safe:
+  // 5 guesses out of 1,000,000, inside a 10-minute window.
+  OTP_TTL_MINUTES: z.coerce.number().int().positive().max(60).default(10),
+  OTP_MAX_ATTEMPTS: z.coerce.number().int().positive().max(10).default(5),
+  OTP_REQUEST_LIMIT_PER_HOUR: z.coerce.number().int().positive().default(5),
+  OTP_VERIFY_LIMIT_PER_HOUR: z.coerce.number().int().positive().default(15),
+
   UPSELL_DELAY_MINUTES: z.coerce.number().int().min(0).default(2),
   UPSELL_OFFER_TTL_HOURS: z.coerce.number().int().positive().default(48),
   UPSELL_COUPON_PCT: z.coerce.number().min(1).max(90).default(15),

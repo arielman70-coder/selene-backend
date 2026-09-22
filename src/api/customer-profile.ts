@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { db } from '../db/client';
 import { logger } from '../utils/logger';
-import { clubProfile } from './identify';
+import { clubProfile } from './serialize';
 import type { ClubRequest } from './middleware';
 import type { TierConfig } from '../db/schema';
 

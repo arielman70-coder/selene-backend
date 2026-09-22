@@ -39,6 +39,7 @@ export async function expireCoupons(): Promise<ExpireResult> {
   }
 
   await db.rpc('prune_rate_limits');
+  await db.rpc('prune_login_codes');
 
   logger.info('Expiry sweep finished', { ...result });
   return result;
