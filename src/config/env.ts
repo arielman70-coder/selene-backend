@@ -18,9 +18,9 @@ const envSchema = z.object({
     /^[a-z0-9-]+\.myshopify\.com$/,
     'must be the *.myshopify.com admin domain, not the storefront domain',
   ),
-  // Either paste a long-lived admin token, or supply client credentials and
-  // let the backend exchange them at runtime. The refine below enforces that
-  // at least one path is fully configured.
+  // Prefer client credentials: the backend exchanges and refreshes them on its
+  // own. A static token is the fallback for setups without an app, and is
+  // IGNORED when client credentials are present — see getAccessToken().
   SHOPIFY_ADMIN_ACCESS_TOKEN: z.string().min(1).optional(),
   SHOPIFY_CLIENT_ID: z.string().min(1).optional(),
   SHOPIFY_CLIENT_SECRET: z.string().min(1).optional(),
@@ -127,7 +127,10 @@ export const corsOrigins = env.CORS_ORIGINS.split(',')
   .map((o) => o.trim())
   .filter(Boolean);
 
-/** When set, shopify.ts exchanges these for an access token instead of using a static one. */
+/**
+ * When set, shopify.ts exchanges these for an access token and refreshes it
+ * automatically. Takes precedence over SHOPIFY_ADMIN_ACCESS_TOKEN.
+ */
 export const shopifyClientCredentials = env.SHOPIFY_CLIENT_ID && env.SHOPIFY_CLIENT_SECRET
   ? { clientId: env.SHOPIFY_CLIENT_ID, clientSecret: env.SHOPIFY_CLIENT_SECRET }
   : null;

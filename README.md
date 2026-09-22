@@ -122,12 +122,16 @@ Things that are deliberate, so they don't get "simplified" back later:
   by hand leaves the parser with nothing and `req.body` permanently empty.
 - **HMAC compares length before `timingSafeEqual`**, which throws on mismatched
   buffers — a one-character header would otherwise 500 instead of 401.
-- **The Shopify token can be static or exchanged.** Set
-  `SHOPIFY_ADMIN_ACCESS_TOKEN`, or set `SHOPIFY_CLIENT_ID`/`SHOPIFY_CLIENT_SECRET`
-  and the backend exchanges them via `POST /admin/oauth/access_token`
-  (`grant_type=client_credentials`). The exchanged token is cached in memory,
-  refreshed a minute before any `expires_in`, fetched single-flight so a batch
-  of concurrent calls triggers one exchange, and re-fetched once on a 401.
+- **The Shopify token refreshes itself, and client credentials always win.**
+  Set `SHOPIFY_CLIENT_ID`/`SHOPIFY_CLIENT_SECRET` and the backend exchanges
+  them via `POST /admin/oauth/access_token` (`grant_type=client_credentials`),
+  caching the result in memory, refreshing a minute before `expires_in`,
+  fetching single-flight so a batch of concurrent calls triggers one exchange,
+  and re-fetching once on a 401. `SHOPIFY_ADMIN_ACCESS_TOKEN` is only a
+  fallback for setups with no app, and is ignored whenever client credentials
+  exist — a client_credentials token lasts 24 hours, so one pasted into that
+  variable used to shadow the refresh logic and take Shopify down a day later,
+  with no way to recover on its own. Boot logs which mode is active.
 - **Coupon codes use `crypto.randomInt`.** These are bearer instruments;
   `Math.random()` is predictable enough to guess forward from a known code.
 - **Webhooks ack before working.** Shopify times out at 5s and retries.

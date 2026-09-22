@@ -7,8 +7,16 @@ const TOKEN_URL = `https://${env.SHOPIFY_STORE_DOMAIN}/admin/oauth/access_token`
 /**
  * Access token, obtained one of two ways:
  *
- *   - SHOPIFY_ADMIN_ACCESS_TOKEN, used as-is
  *   - SHOPIFY_CLIENT_ID/SECRET, exchanged via the client_credentials grant
+ *   - SHOPIFY_ADMIN_ACCESS_TOKEN, used as-is (only when no client credentials)
+ *
+ * Client credentials WIN when both are configured. That order is deliberate
+ * and was learned the hard way: a client_credentials token lives 24 hours, so
+ * pasting one into SHOPIFY_ADMIN_ACCESS_TOKEN produces a service that works
+ * for a day and then 401s on every Shopify call — and because the static path
+ * also skipped the 401-refresh below, it could not recover on its own. The
+ * exchange path renews itself forever, so it must never be shadowed by a
+ * stale env var.
  *
  * The exchanged token is cached in memory. Shopify returns `expires_in` for
  * tokens that expire; when it does, we refresh a minute early rather than
@@ -21,6 +29,15 @@ const TOKEN_URL = `https://${env.SHOPIFY_STORE_DOMAIN}/admin/oauth/access_token`
 let cachedToken: string | null = null;
 let tokenExpiresAt = 0;
 let inFlight: Promise<string> | null = null;
+
+// Stated once at boot so the active mode is never a guess when debugging a 401.
+if (shopifyClientCredentials) {
+  logger.info('Shopify auth: client_credentials (token auto-refreshes)', {
+    staticTokenIgnored: Boolean(env.SHOPIFY_ADMIN_ACCESS_TOKEN),
+  });
+} else {
+  logger.warn('Shopify auth: static token — no auto-refresh. Set SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET to make this self-renewing.');
+}
 
 async function exchangeClientCredentials(): Promise<string> {
   const creds = shopifyClientCredentials!;
@@ -70,7 +87,9 @@ async function exchangeClientCredentials(): Promise<string> {
 }
 
 async function getAccessToken(): Promise<string> {
-  if (env.SHOPIFY_ADMIN_ACCESS_TOKEN) return env.SHOPIFY_ADMIN_ACCESS_TOKEN;
+  // No credentials to exchange — fall back to whatever static token exists.
+  if (!shopifyClientCredentials) return env.SHOPIFY_ADMIN_ACCESS_TOKEN!;
+
   if (cachedToken && Date.now() < tokenExpiresAt) return cachedToken;
 
   // Single-flight: the abandoned-cart job fires many calls at once, and
@@ -128,9 +147,11 @@ async function shopifyFetch<T>(
     headers: { ...(await buildHeaders()), ...(init.headers as Record<string, string> | undefined) },
   });
 
-  // An exchanged token can be revoked or expire without an expires_in hint.
-  // Refresh once and retry before treating it as a real failure.
-  if (res.status === 401 && shopifyClientCredentials && !env.SHOPIFY_ADMIN_ACCESS_TOKEN && !didRefresh) {
+  // A token can be revoked or expire without an expires_in hint. Refresh once
+  // and retry before treating it as a real failure. Gated only on having
+  // credentials to exchange — not on the static token being absent, which is
+  // what previously turned a routine expiry into permanent downtime.
+  if (res.status === 401 && shopifyClientCredentials && !didRefresh) {
     logger.warn('Shopify returned 401; refreshing access token', { path });
     invalidateToken();
     return shopifyFetch<T>(path, init, attempt, true);
