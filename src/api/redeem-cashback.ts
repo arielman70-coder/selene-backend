@@ -25,12 +25,18 @@ import type { ClubRequest } from './middleware';
  * and nothing reconciles it afterwards. Debiting first means the worst case
  * is a failed mint, which we refund immediately and the customer retries.
  *
- * The code itself is NOT returned in the response — it is sent to the email
- * or WhatsApp number already on the customer record. A club session only
- * proves someone typed an email, not that they own it, so echoing the code
- * back would let a stranger convert another person's balance into a discount
- * they could spend. Delivering out-of-band means the worst a stranger can do
- * is move someone's balance into a code only that person receives.
+ * The code is both returned in the response and delivered out-of-band to the
+ * email or WhatsApp number on the customer record.
+ *
+ * Echoing it back used to be unsafe: /api/identify minted a session from an
+ * email address alone, so a stranger could convert someone else's balance
+ * into a code they could spend. OTP login replaced that endpoint — a session
+ * now proves possession of a code mailed to that address — and the same
+ * caller can already read the code from GET /customer/active-coupon, so
+ * withholding it here bought nothing.
+ *
+ * Out-of-band delivery stays: the customer usually wants the code later, on a
+ * device that isn't the one they redeemed on.
  */
 export async function redeemCashback(req: Request, res: Response): Promise<void> {
   const customer = (req as ClubRequest).customer!;
@@ -73,11 +79,10 @@ export async function redeemCashback(req: Request, res: Response): Promise<void>
     .maybeSingle();
 
   if (existing) {
-    // Same reasoning as below: the amount and expiry are safe to show, the
-    // code is not.
     res.status(409).json({
-      error: 'יש לך כבר קופון קאשבק פעיל — הקוד נשלח אליך',
+      error: 'יש לך כבר קופון קאשבק פעיל',
       existing_coupon: {
+        code: existing.code,
         amount: Number(existing.discount_value),
         expires_at: existing.expires_at,
       },
@@ -211,16 +216,20 @@ export async function redeemCashback(req: Request, res: Response): Promise<void>
       customerId: customer.id, code: coupon.code, amount,
     });
     res.status(200).json({
+      code: coupon.code,
+      amount,
       discount_amount: amount,
       expires_at: coupon.expiresAt,
       new_balance: newBalance,
       delivered_to: [],
-      message: 'הקוד נוצר אך לא הצלחנו לשלוח אותו. פנה אלינו ונעביר לך אותו.',
+      message: 'הקוד נוצר אך לא הצלחנו לשלוח אותו במייל או בוואטסאפ — שמור אותו מהמסך.',
     });
     return;
   }
 
   res.json({
+    code: coupon.code,
+    amount,
     discount_amount: amount,
     expires_at: coupon.expiresAt,
     new_balance: newBalance,
