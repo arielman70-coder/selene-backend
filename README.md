@@ -30,8 +30,18 @@ Then, in the Supabase SQL editor, run in order:
 
 1. `supabase/migrations/001_initial_schema.sql` — tables, indexes, RLS, tier seed
 2. `supabase/migrations/002_functions.sql` — atomic balance/claim functions
-3. `supabase/migrations/003_cron.sql` — **after deploying**, with `<BACKEND_URL>`
+3. `supabase/migrations/004_login_codes.sql` — email OTP table and functions
+4. `supabase/migrations/005_tiers_and_cashback_expiry.sql` — current tier ladder,
+   `last_accrual_at`, and the cashback expiry sweep
+5. `supabase/migrations/003_cron.sql` — **after deploying**, with `<BACKEND_URL>`
    and `<CRON_SECRET>` replaced
+
+Apply 005 **before** deploying the code that ships with it. Migration-first is
+safe in both directions: the old 3-argument `increment_cashback` calls still
+resolve against the new 4-argument function via its default. Code-first is not
+— `expire_stale_cashback` would not exist yet (the sweep logs an error and
+skips, harmlessly), and the two refund paths in `redeem-cashback.ts` would pass
+a `p_touch_accrual` argument the deployed function has no parameter for.
 
 Deploy, then point Shopify at the deployment:
 
@@ -91,6 +101,15 @@ cart converted so nobody who already bought gets chased.
 **Cashback.** `orders/create` credits `subtotal × tier.cashback_pct`, writes a
 ledger row, and re-evaluates the tier. `refunds/create` reverses it pro-rata.
 Redemption converts a balance into a fixed-amount discount code.
+
+The ladder is bronze 5% / silver 7% from ₪500 / gold 10% from ₪1,500 /
+platinum 12% from ₪3,000, and tiers only ever move up.
+
+A balance expires `CASHBACK_EXPIRY_MONTHS` (default 12) after the customer's
+last accrual. `last_accrual_at` is stamped by `increment_cashback` on every
+credit; the hourly job zeroes anything past the window and writes an `expire`
+ledger row for it. Refunding a failed redemption deliberately does not restamp
+the clock — the customer is getting back money they already had.
 
 **Upsell.** `orders/create` enqueues a row in `upsell_queue` scheduled
 `UPSELL_DELAY_MINUTES` out. A per-minute job matches an offer from

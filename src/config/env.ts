@@ -55,6 +55,9 @@ const envSchema = z.object({
 
   CASHBACK_COUPON_TTL_DAYS: z.coerce.number().int().positive().default(7),
   CASHBACK_MIN_REDEEM: z.coerce.number().positive().default(10),
+  // Balances die this long after the last accrual. Lowering it expires real
+  // money on the next hourly sweep, so change it deliberately.
+  CASHBACK_EXPIRY_MONTHS: z.coerce.number().int().positive().default(12),
   REDEEM_RATE_LIMIT_PER_HOUR: z.coerce.number().int().positive().default(3),
   // Balance lookup is unauthenticated, so this is the only thing standing
   // between a scraper and the whole customer list. Keep it tight.

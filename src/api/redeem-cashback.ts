@@ -127,6 +127,9 @@ export async function redeemCashback(req: Request, res: Response): Promise<void>
       p_customer_id: customer.id,
       p_earn_amount: amount,
       p_total_amount: 0,
+      // Handing back money the customer already had — not a fresh accrual,
+      // so it must not restart their 12-month expiry clock.
+      p_touch_accrual: false,
     });
 
     if (refundError) {
@@ -169,6 +172,7 @@ export async function redeemCashback(req: Request, res: Response): Promise<void>
       p_customer_id: customer.id,
       p_earn_amount: amount,
       p_total_amount: 0,
+      p_touch_accrual: false,
     });
     res.status(500).json({ error: 'שגיאה במימוש הקאשבק. היתרה לא חויבה.' });
     return;

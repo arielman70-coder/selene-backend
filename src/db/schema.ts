@@ -29,6 +29,8 @@ export interface Customer {
   cashback_balance: number;
   cashback_earned: number;
   cashback_redeemed: number;
+  /** Last time cashback was credited. Null only before 005 is applied. */
+  last_accrual_at: string | null;
   opted_in_whatsapp: boolean;
   opted_in_email: boolean;
   created_at: string;
