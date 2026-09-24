@@ -6,7 +6,7 @@
  * once the project is linked; until then keep this in step with the SQL.
  */
 
-export type Tier = 'bronze' | 'silver' | 'gold' | 'platinum';
+export type Tier = 'bronze' | 'silver' | 'gold';
 
 export interface TierConfig {
   tier: Tier;

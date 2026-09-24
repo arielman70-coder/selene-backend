@@ -1,20 +1,37 @@
 -- =====================================================================
 -- 005_tiers_and_cashback_expiry.sql
 -- Two independent changes:
---   1. New tier ladder — every threshold down, every rate up.
+--   1. New tier ladder — bronze / silver / gold, platinum retired.
 --   2. Cashback balances expire 12 months after the customer's last accrual.
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
--- 1. Tier ladder
+-- 1. Tier ladder: bronze / silver / gold
 -- ---------------------------------------------------------------------
--- UPDATE rather than another seeded INSERT: 001 already created these four
--- rows, so `on conflict do nothing` would be a no-op and the old values
--- would quietly survive the migration.
+-- UPDATE rather than another seeded INSERT: 001 already created these rows,
+-- so `on conflict do nothing` would be a no-op and the old values would
+-- quietly survive the migration.
 update tier_config set min_spent = 0,    cashback_pct = 0.0500 where tier = 'bronze';
 update tier_config set min_spent = 500,  cashback_pct = 0.0700 where tier = 'silver';
 update tier_config set min_spent = 1500, cashback_pct = 0.1000 where tier = 'gold';
-update tier_config set min_spent = 3000, cashback_pct = 0.1200 where tier = 'platinum';
+
+-- Retire platinum.
+--
+-- 001 still seeds the row and is deliberately left alone — it has already
+-- been applied, and editing an applied migration desyncs every database that
+-- ran the earlier version. The row is removed here instead, so a fresh
+-- install and an existing one converge on the same three tiers.
+--
+-- Deleting it is not cosmetic. recalculateTier() reads the ladder out of this
+-- table at runtime, so a surviving platinum row would keep promoting people
+-- into a tier that `Tier` in src/db/schema.ts no longer admits — the API
+-- would then hand the frontend a tier it cannot render.
+--
+-- Anyone standing on platinum moves to gold first, or customers.tier's
+-- foreign key blocks the delete. This is the only demotion in the system and
+-- it costs the customer nothing: platinum paid 7%, the new gold pays 10%.
+update customers set tier = 'gold', updated_at = now() where tier = 'platinum';
+delete from tier_config where tier = 'platinum';
 
 -- Every threshold dropped, so customers whose lifetime spend already clears a
 -- new threshold are sitting on a tier they have outgrown. recalculateTier()

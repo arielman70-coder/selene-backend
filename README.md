@@ -102,8 +102,10 @@ cart converted so nobody who already bought gets chased.
 ledger row, and re-evaluates the tier. `refunds/create` reverses it pro-rata.
 Redemption converts a balance into a fixed-amount discount code.
 
-The ladder is bronze 5% / silver 7% from ₪500 / gold 10% from ₪1,500 /
-platinum 12% from ₪3,000, and tiers only ever move up.
+The ladder is bronze 5% / silver 7% from ₪500 / gold 10% from ₪1,500, and
+tiers only ever move up. 005 retires the platinum tier that 001 seeded,
+moving anyone still on it to gold — the one demotion in the system, and a
+raise at that, since platinum paid 7%.
 
 A balance expires `CASHBACK_EXPIRY_MONTHS` (default 12) after the customer's
 last accrual. `last_accrual_at` is stamped by `increment_cashback` on every
